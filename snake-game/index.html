@@ -94,7 +94,7 @@
                 else if (snakeY >= canvas.height) snakeY = 0;
             } else {
                 // End the game if the snake hits the wall
-                if (snakeX < 0 || snakeY < 0 || snakeX >= canvas.width || snakeY >= canvas.height) {
+                if (snakeX < 0 || snakeX + box > canvas.width || snakeY < 0 || snakeY + box > canvas.height) {
                     clearInterval(game);
                     alert(`Game Over! Your score: ${score}`);
                     resetGame();
