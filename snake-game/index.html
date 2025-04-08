@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Snake Game</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            height: 100vh;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            border: 1px solid #000;
+            background-color: #fff;
+        }
+    </style>
+</head>
+<body>
+    <div id="startbuttons" style="display: block"> 
+        <label for="Speed">Select Speed</label>
+        <input id="Speed" type="number" min="1" value="100">
+        <label for="Safe-mode">Enable Safe Mode?</label>
+        <input id="Safe-mode" type="checkbox" onchange="Safemodebutton()">
+        <button id="LETSAGO" onclick="startGame()">Start Game</button>
+    </div>
+    <button id="LETSASTOP" style="display: block" onclick="resetGame()">End Game</button>
+    <canvas id="gameCanvas" width="400" height="400"></canvas>
+    <div id="score" style="font-size: 20px; text-align: center; margin-top: 10px;">Score: 0</div>
+    <script>
+        function Safemodebutton() {
+            alert('safemodeenabled.debug.message')
+            let safeModeEnabled = document.getElementById('Safe-mode');
+            if (safeModeEnabled) {
+                document.getElementById('LETSASTOP').style.display = 'block'
+            } else {
+                document.getElementById('LETSASTOP').style.display = 'none';
+            }
+        }
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const box = 20;
+        let snake = [{ x: 9 * box, y: 9 * box }];
+        let direction = 'RIGHT';
+        let food = {
+            x: Math.floor(Math.random() * 20) * box,
+            y: Math.floor(Math.random() * 20) * box
+        };
+        let game;
+        let score = 0; // Initialize score
+
+        document.addEventListener('keydown', directionControl);
+
+        function directionControl(event) {
+            if (event.keyCode === 37 && direction !== 'RIGHT') direction = 'LEFT';
+            else if (event.keyCode === 38 && direction !== 'DOWN') direction = 'UP';
+            else if (event.keyCode === 39 && direction !== 'LEFT') direction = 'RIGHT';
+            else if (event.keyCode === 40 && direction !== 'UP') direction = 'DOWN';
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < snake.length; i++) {
+                ctx.fillStyle = (i === 0) ? 'green' : 'lightgreen';
+                ctx.fillRect(snake[i].x, snake[i].y, box, box);
+                ctx.strokeStyle = 'darkgreen';
+                ctx.strokeRect(snake[i].x, snake[i].y, box, box);
+            }
+
+            ctx.fillStyle = 'red';
+            ctx.fillRect(food.x, food.y, box, box);
+
+            let snakeX = snake[0].x;
+            let snakeY = snake[0].y;
+
+            if (direction === 'LEFT') snakeX -= box;
+            if (direction === 'UP') snakeY -= box;
+            if (direction === 'RIGHT') snakeX += box;
+            if (direction === 'DOWN') snakeY += box;
+
+            // Check if Safe Mode is enabled
+            const safeModeEnabled = document.getElementById('Safe-mode').checked;
+
+            if (safeModeEnabled) {
+                // Loop the snake to the other side of the canvas
+                if (snakeX < 0) snakeX = canvas.width - box;
+                else if (snakeX >= canvas.width) snakeX = 0;
+                if (snakeY < 0) snakeY = canvas.height - box;
+                else if (snakeY >= canvas.height) snakeY = 0;
+            } else {
+                // End the game if the snake hits the wall
+                if (snakeX < 0 || snakeY < 0 || snakeX >= canvas.width || snakeY >= canvas.height) {
+                    clearInterval(game);
+                    alert(`Game Over! Your score: ${score}`);
+                    resetGame();
+                    return;
+                }
+            }
+
+            if (snakeX === food.x && snakeY === food.y) {
+                food = {
+                    x: Math.floor(Math.random() * (canvas.width / box)) * box,
+                    y: Math.floor(Math.random() * (canvas.height / box)) * box
+                };
+                score++; // Increment score
+                document.getElementById('score').innerText = `Score: ${score}`; // Update score display
+            } else {
+                snake.pop();
+            }
+
+            const newHead = { x: snakeX, y: snakeY };
+
+            // Check for collision with the snake's body
+            if (!safeModeEnabled && collision(newHead, snake)) {
+                clearInterval(game);
+                alert(`Game Over! Your score: ${score}`);
+                resetGame();
+                return;
+            }
+
+            snake.unshift(newHead);
+        }
+
+        function collision(head, array) {
+            for (let i = 0; i < array.length; i++) {
+                if (head.x === array[i].x && head.y === array[i].y) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        function resetGame() {
+            alert('resetgame.debug.message');
+            // Reset game state
+            snake = [{ x: 9 * box, y: 9 * box }];
+            direction = 'RIGHT';
+            food = {
+                x: Math.floor(Math.random() * 20) * box,
+                y: Math.floor(Math.random() * 20) * box
+            };
+            score = 0;
+            document.getElementById('score').innerText = `Score: ${score}`;
+            document.getElementById('startbuttons').style.display = 'block'; // Show start menu
+            clearInterval(game); // Pause the game by clearing the interval
+        }
+
+        function startGame() {
+            document.getElementById('startbuttons').style.display = 'none';
+            const speedInput = document.getElementById('Speed').value;
+            const speed = Math.max(50, 1000 / parseInt(speedInput || 10)); // Higher input = faster speed
+            score = 0; // Reset score
+            document.getElementById('score').innerText = `Score: ${score}`; // Reset score display
+            clearInterval(game); // Clear any previous game interval
+            game = setInterval(draw, speed);
+        }
+    </script>
+</body>
+</html>
