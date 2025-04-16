@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gravitational Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            margin: auto;
+            background-color: #111;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+        }
+        button {
+            margin: 5px;
+            padding: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        select {
+            margin: 5px;
+            padding: 10px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="addMassButton">Add New Mass</button>
+        <button id="timeButton">Speed: 1x</button>
+        <button id="pauseButton">Pause Sim</button>
+        <button id="createMoonButton" style="display: none;">Create a Moon</button>
+        <button id="addStarButton">Add Star</button>
+        <button id="orbitButton" style="display: none;">Orbit Nearest Object</button>
+        <button id="resetSimButton">Reset Sim</button>
+        <button id="deleteObjectButton" style="display: none; color: red;">Delete Object</button>
+        <select id="optionsMenu">
+            <option value="none">Options</option>
+            <option value="showGrid">Show Coordinate Grid</option>
+            <option value="showVectors">Show Velocity Vectors</option>
+            <option value="showMass">Display Mass</option>
+            <option value="insanityMode">Insanity Mode</option>
+            <option value="showTrajectories">Show Trajectories</option> <!-- New option -->
+        </select>
+    </div>
+    <canvas id="simulationCanvas"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+    <script>
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+        const addMassButton = document.getElementById('addMassButton');
+        const timeButton = document.getElementById('timeButton');
+        const pauseButton = document.getElementById('pauseButton');
+        const createMoonButton = document.getElementById('createMoonButton');
+        const addStarButton = document.getElementById('addStarButton'); // Reference to the new button
+        const orbitButton = document.getElementById('orbitButton'); // Reference to the new button
+        const resetSimButton = document.getElementById('resetSimButton');
+        const deleteObjectButton = document.getElementById('deleteObjectButton');
+        const optionsMenu = document.getElementById('optionsMenu'); // Reference to the new dropdown menu
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let timeMultiplier = 1;
+        let isPaused = false;
+
+        const BLACK_HOLE_THRESHOLD = 10000; // Mass threshold to turn into a black hole
+        const STAR_BURN_RADIUS = 100; // Radius within which planets lose mass
+        const STAR_BURN_RATE = 1; // Rate at which mass is lost per frame
+
+        let showGrid = false;
+        let showVectors = false;
+        let showMass = true; // Default: mass is displayed
+        let insanityMode = false; // Default: Insanity Mode is off
+        let showTrajectories = false; // Default: trajectories are not shown
+
+        let zoomLevel = 1; // Default zoom level
+        const zoomSpeed = 0.1; // Speed of zooming
+
+        optionsMenu.addEventListener('change', (event) => {
+            switch (event.target.value) {
+                case 'showGrid':
+                    showGrid = !showGrid;
+                    break;
+                case 'showVectors':
+                    showVectors = !showVectors;
+                    break;
+                case 'showMass':
+                    showMass = !showMass;
+                    break;
+                case 'insanityMode':
+                    insanityMode = !insanityMode; // Toggle Insanity Mode
+                    break;
+                case 'showTrajectories':
+                    showTrajectories = !showTrajectories; // Toggle trajectory visibility
+                    break;
+            }
+            optionsMenu.value = 'none'; // Reset dropdown to default
+        });
+
+        // Draw the coordinate grid
+        function drawGrid() {
+            const gridSpacing = 50; // Distance between grid lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.lineWidth = 0.5;
+
+            // Draw vertical lines
+            for (let x = -offsetX % gridSpacing; x < canvas.width; x += gridSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+
+            // Draw horizontal lines
+            for (let y = -offsetY % gridSpacing; y < canvas.height; y += gridSpacing) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+        }
+
+        // Draw velocity vectors
+        function drawVelocityVectors() {
+            ctx.strokeStyle = 'red';
+            ctx.lineWidth = 1;
+
+            for (let body of bodies) {
+                ctx.beginPath();
+                // Start the vector at the body's position (adjusted for camera offset)
+                ctx.moveTo(body.x + offsetX, body.y + offsetY);
+                // End the vector based on the body's velocity (scaled for visualization)
+                ctx.lineTo(
+                    body.x + offsetX + body.vx * 10, // Scale velocity for visualization
+                    body.y + offsetY + body.vy * 10
+                );
+                ctx.stroke();
+            }
+        }
+
+        class Body {
+            constructor(x, y, mass, radius, color, isStar = false) {
+                this.x = x;
+                this.y = y;
+                this.mass = mass;
+                this.radius = radius;
+                this.color = color;
+                this.vx = 0;
+                this.vy = 0;
+                this.isBlackHole = false;
+                this.isStar = isStar; // New property to identify stars
+                this.trajectory = []; // Array to store trajectory points
+            }
+
+            draw() {
+                // Draw trajectory if enabled
+                if (showTrajectories) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 0.5;
+                    for (let i = 0; i < this.trajectory.length - 1; i++) {
+                        const [x1, y1] = this.trajectory[i];
+                        const [x2, y2] = this.trajectory[i + 1];
+                        ctx.moveTo(x1 + offsetX, y1 + offsetY);
+                        ctx.lineTo(x2 + offsetX, y2 + offsetY);
+                    }
+                    ctx.stroke();
+                }
+
+                // Draw the body
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+
+                // Draw water features if it's a water planet
+                if (this.isWaterPlanet) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = 'aqua'; // Color for water
+                    ctx.lineWidth = 2;
+                    ctx.moveTo(this.x + this.waterFeatures[0].x, this.y + this.waterFeatures[0].y);
+                    for (let i = 1; i < this.waterFeatures.length; i++) {
+                        const feature = this.waterFeatures[i];
+                        ctx.lineTo(this.x + feature.x, this.y + feature.y);
+                    }
+                    ctx.closePath();
+                    ctx.stroke();
+                }
+
+                // Conditionally display the mass
+                if (showMass) {
+                    ctx.fillStyle = 'white';
+                    ctx.font = '12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(Math.round(this.mass), this.x, this.y - this.radius - 5);
+                }
+            }
+
+            update(bodies) {
+                for (let body of bodies) {
+                    if (body !== this) {
+                        const dx = body.x - this.x;
+                        const dy = body.y - this.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        // Collision detection
+                        if (distance < this.radius + body.radius) {
+                            this.collide(body, bodies);
+                            continue;
+                        }
+
+                        // Gravitational force calculation
+                        const force = (body.mass / (distance * distance)) || 0;
+                        this.vx += (dx / distance) * force * timeMultiplier;
+                        this.vy += (dy / distance) * force * timeMultiplier;
+
+                        // Star burn effect
+                        if (this.isStar && distance < STAR_BURN_RADIUS) {
+                            body.mass -= STAR_BURN_RATE; // Reduce the mass of nearby bodies
+                        }
+                    }
+                }
+                this.x += this.vx * timeMultiplier;
+                this.y += this.vy * timeMultiplier;
+
+                // Add current position to trajectory
+                if (showTrajectories) {
+                    this.trajectory.push([this.x, this.y]);
+                    if (this.trajectory.length > 500) {
+                        this.trajectory.shift(); // Limit trajectory length to 500 points
+                    }
+                }
+
+                // Check if the body should turn into a black hole
+                if (this.mass > BLACK_HOLE_THRESHOLD && !this.isBlackHole) {
+                    this.turnIntoBlackHole();
+                }
+            }
+
+            collide(other, bodies) {
+                if (insanityMode) {
+                    // In Insanity Mode, masses phase through each other
+                    return; // Skip collision logic entirely
+                } else {
+                    // Normal collision behavior: combine masses
+                    this.mass += other.mass;
+
+                    // Combine velocities (momentum conservation)
+                    this.vx = (this.vx * this.mass + other.vx * other.mass) / (this.mass + other.mass);
+                    this.vy = (this.vy * this.mass + other.vy * other.mass) / (this.mass + other.mass);
+
+                    // Increase radius proportionally to the new mass
+                    this.radius = Math.sqrt(this.radius * this.radius + other.radius * other.radius);
+
+                    // Remove the other body from the simulation
+                    const index = bodies.indexOf(other);
+                    if (index > -1) {
+                        bodies.splice(index, 1);
+                    }
+
+                    // Set the camera to follow the new mass
+                    selectedBody = this;
+                }
+            }
+
+            turnIntoBlackHole() {
+                this.isBlackHole = true;
+                this.color = 'black';
+                this.radius = 50; // Set a fixed radius for black holes
+            }
+        }
+
+        const bodies = [
+            new Body(canvas.width / 2, canvas.height / 2, 10000, 30, 'yellow'),
+            new Body(canvas.width / 2 + 150, canvas.height / 2, 100, 10, 'blue'),
+            new Body(canvas.width / 2 - 150, canvas.height / 2, 100, 10, 'red')
+        ];
+
+        let selectedBody = null; // Variable to store the selected body
+        let offsetX = canvas.width / 2; // Start the camera at (0, 0)
+        let offsetY = canvas.height / 2;
+        let panSpeed = 20; // Speed of panning when using arrow keys
+
+        // Add event listener for keyboard input
+        document.addEventListener('keydown', (event) => {
+            switch (event.key) {
+                case 'ArrowUp': // Move the camera up
+                    offsetY += panSpeed;
+                    break;
+                case 'ArrowDown': // Move the camera down
+                    offsetY -= panSpeed;
+                    break;
+                case 'ArrowLeft': // Move the camera left
+                    offsetX += panSpeed;
+                    break;
+                case 'ArrowRight': // Move the camera right
+                    offsetX -= panSpeed;
+                    break;
+            }
+        });
+
+        document.addEventListener('keydown', (event) => {
+            switch (event.key) {
+                case '+': // Zoom in
+                case '=': // Some keyboards use '=' for '+'
+                    zoomLevel += zoomSpeed;
+                    break;
+                case '-': // Zoom out
+                    zoomLevel = Math.max(0.1, zoomLevel - zoomSpeed); // Prevent zooming out too far
+                    break;
+            }
+        });
+
+        canvas.addEventListener('click', (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = (event.clientX - rect.left - canvas.width / 2) / zoomLevel + canvas.width / 2;
+            const mouseY = (event.clientY - rect.top - canvas.height / 2) / zoomLevel + canvas.height / 2;
+
+            // Check if the click is within any body's radius
+            for (let body of bodies) {
+                const dx = mouseX - (body.x + offsetX);
+                const dy = mouseY - (body.y + offsetY);
+                const distance = Math.sqrt(dx * dx + dy * dy);
+
+                if (distance <= body.radius) {
+                    selectedBody = body; // Select the body
+                    createMoonButton.style.display = 'inline'; // Show the "Create a Moon" button
+                    orbitButton.style.display = 'inline'; // Show the "Orbit Nearest Object" button
+                    deleteObjectButton.style.display = 'inline'; // Show the "Delete Object" button
+
+                    // Center the camera on the selected body
+                    offsetX = canvas.width / 2 - body.x;
+                    offsetY = canvas.height / 2 - body.y;
+
+                    return;
+                }
+            }
+
+            // Deselect if no body is clicked
+            selectedBody = null;
+            createMoonButton.style.display = 'none'; // Hide the "Create a Moon" button
+            orbitButton.style.display = 'none'; // Hide the "Orbit Nearest Object" button
+            deleteObjectButton.style.display = 'none'; // Hide the "Delete Object" button
+        });
+
+        addMassButton.addEventListener('click', () => {
+            // Generate random position within the visible canvas area
+            const x = Math.random() * (canvas.width - 100) + 50; // Keep 50px padding from edges
+            const y = Math.random() * (canvas.height - 100) + 50; // Keep 50px padding from edges
+            const mass = Math.random() * 500 + 50; // Random mass for the new object
+            const radius = Math.random() * 10 + 5; // Random radius for the new object
+            const isWaterPlanet = Math.random() < 0.2; // 20% chance to create a water planet
+            const color = isWaterPlanet ? 'blue' : `hsl(${Math.random() * 360}, 100%, 50%)`;
+
+            const planet = new Body(x - offsetX, y - offsetY, mass, radius, color);
+
+            // If it's a water planet, generate lakes and rivers
+            if (isWaterPlanet) {
+                planet.isWaterPlanet = true;
+                planet.waterFeatures = generateWaterFeatures(radius);
+            }
+
+            bodies.push(planet);
+        });
+
+        timeButton.addEventListener('click', () => {
+            if (timeMultiplier === 1) {
+                timeMultiplier = 0.5;
+                timeButton.textContent = 'Speed: 0.5x';
+            } else if (timeMultiplier === 0.5) {
+                timeMultiplier = 2;
+                timeButton.textContent = 'Speed: 2x';
+            } else {
+                timeMultiplier = 1;
+                timeButton.textContent = 'Speed: 1x';
+            }
+        });
+
+        pauseButton.addEventListener('click', () => {
+            isPaused = !isPaused;
+            pauseButton.textContent = isPaused ? 'Resume Sim' : 'Pause Sim';
+        });
+
+        createMoonButton.addEventListener('click', () => {
+            if (selectedBody) {
+                const angle = Math.random() * Math.PI * 2; // Random angle for moon's position
+                const distance = selectedBody.radius + 50; // Distance from the selected body
+                const x = selectedBody.x + Math.cos(angle) * distance;
+                const y = selectedBody.y + Math.sin(angle) * distance;
+                const mass = Math.random() * 50 + 10; // Random mass for the moon
+                const radius = Math.random() * 5 + 3; // Random radius for the moon
+                const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+
+                const moon = new Body(x, y, mass, radius, color);
+
+                // Calculate orbital velocity
+                const gravitationalForce = selectedBody.mass / (distance * distance);
+                const orbitalVelocity = Math.sqrt(gravitationalForce * distance);
+
+                // Set the moon's velocity perpendicular to the direction to the selected body
+                moon.vx = selectedBody.vx + Math.sin(angle) * orbitalVelocity;
+                moon.vy = selectedBody.vy - Math.cos(angle) * orbitalVelocity;
+
+                bodies.push(moon);
+            }
+        });
+
+        addStarButton.addEventListener('click', () => {
+            // Generate random position within the visible canvas area
+            const x = Math.random() * canvas.width - offsetX; // Adjust for camera offset
+            const y = Math.random() * canvas.height - offsetY; // Adjust for camera offset
+            const mass = Math.random() * 1000 + 500; // Random mass for the star
+            const radius = Math.random() * 20 + 10; // Random radius for the star
+            const color = 'yellow'; // Star color
+            const star = new Body(x, y, mass, radius, color, true); // Create a star
+            bodies.push(star);
+        });
+
+        orbitButton.addEventListener('click', () => {
+            if (selectedBody) {
+                let nearestBody = null;
+                let minDistance = Infinity;
+
+                // Find the nearest body to the selected body
+                for (let body of bodies) {
+                    if (body !== selectedBody) {
+                        const dx = body.x - selectedBody.x;
+                        const dy = body.y - selectedBody.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        if (distance < minDistance) {
+                            minDistance = distance;
+                            nearestBody = body;
+                        }
+                    }
+                }
+
+                // Adjust the selected body's velocity to orbit the nearest body
+                if (nearestBody) {
+                    const dx = nearestBody.x - selectedBody.x;
+                    const dy = nearestBody.y - selectedBody.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    // Calculate the orbital velocity
+                    const orbitalVelocity = Math.sqrt(nearestBody.mass / distance);
+
+                    // Set the velocity perpendicular to the direction to the nearest body
+                    selectedBody.vx = -dy / distance * orbitalVelocity + nearestBody.vx;
+                    selectedBody.vy = dx / distance * orbitalVelocity + nearestBody.vy;
+                }
+            }
+        });
+
+        // Reset Simulation
+        resetSimButton.addEventListener('click', () => {
+            // Clear all bodies
+            bodies.length = 0;
+
+            // Reset the selected body and offsets
+            selectedBody = null;
+            offsetX = 0;
+            offsetY = 0;
+
+            // Add initial bodies (default state)
+            bodies.push(
+                new Body(canvas.width / 2, canvas.height / 2, 10000, 30, 'yellow'),
+                new Body(canvas.width / 2 + 150, canvas.height / 2, 100, 10, 'blue'),
+                new Body(canvas.width / 2 - 150, canvas.height / 2, 100, 10, 'red')
+            );
+
+            // Hide buttons related to selected bodies
+            createMoonButton.style.display = 'none';
+            orbitButton.style.display = 'none';
+            deleteObjectButton.style.display = 'none';
+        });
+
+        // Delete Object
+        deleteObjectButton.addEventListener('click', () => {
+            if (selectedBody) {
+                const confirmDelete = confirm("Are you sure you want to delete this?");
+                if (confirmDelete) {
+                    const index = bodies.indexOf(selectedBody);
+                    if (index > -1) {
+                        bodies.splice(index, 1); // Remove the selected body
+                    }
+                    selectedBody = null; // Deselect the body
+                    createMoonButton.style.display = 'none';
+                    orbitButton.style.display = 'none';
+                    deleteObjectButton.style.display = 'none';
+                }
+            }
+        });
+
+        function drawIndicators() {
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+
+            for (let body of bodies) {
+                const screenX = body.x + offsetX;
+                const screenY = body.y + offsetY;
+
+                // Check if the body is off-screen
+                if (screenX < 0 || screenX > canvas.width || screenY < 0 || screenY > canvas.height) {
+                    // Calculate the angle from the center of the canvas to the body
+                    const dx = screenX - centerX;
+                    const dy = screenY - centerY;
+                    const angle = Math.atan2(dy, dx);
+
+                    // Determine the edge of the canvas where the indicator should appear
+                    const edgeX = Math.max(0, Math.min(canvas.width, centerX + Math.cos(angle) * (canvas.width / 2)));
+                    const edgeY = Math.max(0, Math.min(canvas.height, centerY + Math.sin(angle) * (canvas.height / 2)));
+
+                    // Calculate the distance to the body
+                    const distance = Math.sqrt((body.x - (-offsetX)) ** 2 + (body.y - (-offsetY)) ** 2);
+
+                    // Draw the indicator (a small triangle pointing toward the body)
+                    ctx.beginPath();
+                    ctx.moveTo(edgeX, edgeY);
+                    ctx.lineTo(edgeX - 10 * Math.cos(angle - Math.PI / 6), edgeY - 10 * Math.sin(angle - Math.PI / 6));
+                    ctx.lineTo(edgeX - 10 * Math.cos(angle + Math.PI / 6), edgeY - 10 * Math.sin(angle + Math.PI / 6));
+                    ctx.closePath();
+                    ctx.fillStyle = 'white';
+                    ctx.fill();
+
+                    // Display the distance near the indicator
+                    ctx.fillStyle = 'white';
+                    ctx.font = '12px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`${Math.round(distance)} units`, edgeX, edgeY - 15);
+                }
+            }
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Lock the camera onto the selected body if one is selected
+            if (selectedBody) {
+                offsetX = canvas.width / 2 - selectedBody.x;
+                offsetY = canvas.height / 2 - selectedBody.y;
+            }
+
+            // Apply zoom
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2); // Translate to the center of the canvas
+            ctx.scale(zoomLevel, zoomLevel); // Apply zoom
+            ctx.translate(-canvas.width / 2, -canvas.height / 2); // Translate back
+
+            // Draw the coordinate grid if enabled
+            if (showGrid) {
+                drawGrid();
+            }
+
+            ctx.translate(offsetX, offsetY); // Apply the offset for panning
+
+            // Always draw the planets, even if the simulation is paused
+            for (let body of bodies) {
+                if (!isPaused) {
+                    body.update(bodies); // Update only when not paused
+                }
+                body.draw(); // Always draw the planets
+            }
+
+            // Draw velocity vectors if enabled
+            if (showVectors) {
+                drawVelocityVectors();
+            }
+
+            ctx.restore();
+
+            // Always draw indicators for off-screen planets
+            drawIndicators();
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+        if(insanityMode) {
+            const confirminsanity = confirm("Insanity Mode resets current sim, Are you sure?");
+            if (confirminsanity) {
+                bodies.length = 0;
+                const canvas = document.getElementById('simulationCanvas');
+                const ctx = canvas.getContext('2d');
+                const addMassButton = document.getElementById('addMassButton');
+                const timeButton = document.getElementById('timeButton');
+                const pauseButton = document.getElementById('pauseButton');
+
+                canvas.width = window.innerWidth;
+                canvas.height = window.innerHeight;
+
+                let timeMultiplier = 1;
+                let isPaused = false;
+
+                class Body {
+                    constructor(x, y, mass, radius, color) {
+                        this.x = x;
+                        this.y = y;
+                        this.mass = mass;
+                        this.radius = radius;
+                        this.color = color;
+                        this.vx = 0;
+                        this.vy = 0;
+                    }
+
+                    draw() {
+                        ctx.beginPath();
+                        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                        ctx.fillStyle = this.color;
+                        ctx.fill();
+                        ctx.closePath();
+                    }
+
+                    update(bodies) {
+                        for (let body of bodies) {
+                            if (body !== this) {
+                                const dx = body.x - this.x;
+                                const dy = body.y - this.y;
+                                const distance = Math.sqrt(dx * dx + dy * dy);
+                                const force = (body.mass / (distance * distance)) || 0;
+
+                                this.vx += (dx / distance) * force * timeMultiplier;
+                                this.vy += (dy / distance) * force * timeMultiplier;
+                            }
+                        }
+                        this.x += this.vx * timeMultiplier;
+                        this.y += this.vy * timeMultiplier;
+                    }
+                }
+
+                const bodies = [
+                    new Body(canvas.width / 2, canvas.height / 2, 10000, 30, 'yellow'),
+                    new Body(canvas.width / 2 + 150, canvas.height / 2, 100, 10, 'blue'),
+                    new Body(canvas.width / 2 - 150, canvas.height / 2, 100, 10, 'red')
+                ];
+
+                addMassButton.addEventListener('click', () => {
+                    const x = Math.random() * canvas.width;
+                    const y = Math.random() * canvas.height;
+                    const mass = Math.random() * 500 + 50;
+                    const radius = Math.random() * 10 + 5;
+                    const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+                    bodies.push(new Body(x, y, mass, radius, color));
+                });
+
+                timeButton.addEventListener('click', () => {
+                    if (timeMultiplier === 1) {
+                        timeMultiplier = 0.5;
+                        timeButton.textContent = 'Speed: 0.5x';
+                    } else if (timeMultiplier === 0.5) {
+                        timeMultiplier = 2;
+                        timeButton.textContent = 'Speed: 2x';
+                    } else {
+                        timeMultiplier = 1;
+                        timeButton.textContent = 'Speed: 1x';
+                    }
+                });
+
+                pauseButton.addEventListener('click', () => {
+                    isPaused = !isPaused;
+                    pauseButton.textContent = isPaused ? 'Resume Sim' : 'Pause Sim';
+                });
+
+                function animate() {
+                    if (!isPaused) {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        for (let body of bodies) {
+                            body.update(bodies);
+                            body.draw();
+                        }
+                    }
+                    requestAnimationFrame(animate);
+                }
+
+                animate();
+            }
+        }
+
+        function generateWaterFeatures(radius) {
+            const simplex = new SimplexNoise(); // Create a new Perlin noise generator
+            const waterFeatures = [];
+            const resolution = 400; // Higher resolution for smoother curves
+            const octaves = 8; // Number of noise layers
+            const initialAmplitude = 1; // Starting amplitude
+            const initialFrequency = 1; // Starting frequency
+
+            for (let i = 0; i < resolution; i++) {
+                const angle = (i / resolution) * Math.PI * 2; // Angle around the planet
+
+                // Randomize base distance with a chance for lakes near the center
+                let baseDistance;
+                if (Math.random() < 0.3) {
+                    // 30% chance to generate lakes closer to the center
+                    baseDistance = Math.random() * radius * 0.4; // Closer to the center
+                } else {
+                    baseDistance = Math.random() * radius * 0.4 + radius * 0.4; // Closer to the edge
+                }
+
+                // Generate fractal noise with decreasing intensity for each layer
+                let noise = 0;
+                let amplitude = initialAmplitude;
+                let frequency = initialFrequency;
+                for (let octave = 0; octave < octaves; octave++) {
+                    noise += amplitude * simplex.noise2D(Math.cos(angle) * frequency, Math.sin(angle) * frequency);
+                    amplitude *= 0.5; // Reduce amplitude by half for the next layer
+                    frequency *= 2; // Double the frequency for the next layer
+                }
+
+                // Adjust the distance based on the fractal noise
+                let adjustedDistance = baseDistance + noise * radius * 0.1; // Scale noise to fit within the planet
+
+                // Clamp the adjusted distance to ensure it stays within the planet's radius
+                adjustedDistance = Math.max(0, Math.min(adjustedDistance, radius * 0.95)); // Keep it slightly inside the planet's edge
+
+                const x = Math.cos(angle) * adjustedDistance;
+                const y = Math.sin(angle) * adjustedDistance;
+
+                // Add the water feature point
+                waterFeatures.push({ x, y });
+            }
+
+            // Smooth the water features
+            return smoothWaterFeatures(waterFeatures);
+        }
+
+        function smoothWaterFeatures(waterFeatures) {
+            const smoothedFeatures = [];
+            const len = waterFeatures.length;
+
+            for (let i = 0; i < len; i++) {
+                const prev = waterFeatures[(i - 1 + len) % len]; // Previous point (wrap around)
+                const current = waterFeatures[i]; // Current point
+                const next = waterFeatures[(i + 1) % len]; // Next point (wrap around)
+
+                // Average the current point with its neighbors
+                const x = (prev.x + current.x + next.x) / 3;
+                const y = (prev.y + current.y + next.y) / 3;
+
+                smoothedFeatures.push({ x, y });
+            }
+
+            return smoothedFeatures;
+        }
+    </script>
+</body>
+</html>

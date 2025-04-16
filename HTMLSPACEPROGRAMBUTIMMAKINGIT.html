@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rocket Sim</title>
+    
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="SIMCANVAS"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script>
+        // Matter.js setup
+        const { Engine, Runner, World, Bodies, Body, Events } = Matter;
+        const engine = Engine.create();
+        const world = engine.world;
+        const runner = Runner.create();
+
+        // Create the rocket
+        const rocket = Bodies.rectangle(400, 300, 20, 50, {
+            frictionAir: 0.002,
+            restitution: 0.001,
+            density: 0.01,
+        });
+        World.add(world, rocket);
+
+        // Create the ground
+        const ground = Bodies.rectangle(400, 580, 810, 60, { isStatic: true });
+        World.add(world, ground);
+
+        // Apply thrust to the rocket
+        function applyThrust() {
+            const thrustForce = { x: 0, y: -0.05 }; // Upward force
+            Body.applyForce(rocket, rocket.position, thrustForce);
+        }
+
+        // Listen for user input
+        window.addEventListener('keydown', (event) => {
+            if (event.code === 'Space') {
+                applyThrust();
+            }
+        });
+
+        // Run the Matter.js engine
+        Runner.run(runner, engine);
+
+        // Planck.js setup
+        const planck = require('planck-js');
+        const worldMap = planck.World(planck.Vec2(0, 0)); // No gravity for orbital mechanics
+
+        // Create the planet
+        const planet = worldMap.createBody();
+        planet.createFixture(planck.Circle(50), { density: 0 }); // Planet radius is 50
+
+        // Create the rocket
+        const rocketMap = worldMap.createBody(planck.Vec2(0, -200)); // Start 200 units above the planet
+        rocketMap.createFixture(planck.Box(10, 25), { density: 1 }); // Rocket dimensions
+
+        // Simulate orbital mechanics
+        function updateMapPhysics() {
+            const planetPos = planet.getPosition();
+            const rocketPos = rocketMap.getPosition();
+
+            // Calculate gravitational force
+            const dx = planetPos.x - rocketPos.x;
+            const dy = planetPos.y - rocketPos.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const gravity = 0.001; // Gravitational constant
+            const forceMagnitude = gravity / (distance * distance);
+
+            const force = planck.Vec2(dx / distance * forceMagnitude, dy / distance * forceMagnitude);
+            rocketMap.applyForceToCenter(force);
+        }
+
+        // Step the Planck.js world
+        function stepMapPhysics() {
+            updateMapPhysics();
+            worldMap.step(1 / 60); // Step the physics simulation
+            requestAnimationFrame(stepMapPhysics);
+        }
+        stepMapPhysics();
+
+        // Sync Matter.js and Planck.js physics
+        function syncPhysics() {
+            // Sync Matter.js rocket position with Planck.js
+            const matterRocketPos = rocket.position;
+            rocketMap.setPosition(planck.Vec2(matterRocketPos.x, matterRocketPos.y));
+
+            // Sync Planck.js rocket position with Matter.js
+            const planckRocketPos = rocketMap.getPosition();
+            Body.setPosition(rocket, { x: planckRocketPos.x, y: planckRocketPos.y });
+
+            requestAnimationFrame(syncPhysics);
+        }
+        syncPhysics();
+
+        // Render the map
+        const canvas = document.getElementById('SIMCANVAS');
+        const ctx = canvas.getContext('2d');
+
+        function renderMap(ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the planet
+            ctx.fillStyle = 'blue';
+            ctx.beginPath();
+            ctx.arc(canvas.width / 2, canvas.height / 2, 50, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw the rocket
+            const rocketPos = rocketMap.getPosition();
+            ctx.fillStyle = 'red';
+            ctx.beginPath();
+            ctx.arc(rocketPos.x + canvas.width / 2, rocketPos.y + canvas.height / 2, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            requestAnimationFrame(() => renderMap(ctx));
+        }
+        renderMap(ctx);
+    </script>
+</body>
+</html>

@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rocket Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="simulationCanvas"></canvas>
+    <canvas id="vabCanvas" style="display: none;"></canvas>
+    <button id="vabButton" style="position: absolute; top: 10px; left: 10px; z-index: 10;">Enter VAB</button>
+    <button id="launchButton" style="position: absolute; top: 10px; left: 100px; z-index: 10; display: none;">Launch</button>
+    <canvas id="mapCanvas" style="display: none; position: absolute; top: 0; left: 0; z-index: 5;"></canvas>
+    <button id="mapButton" style="position: absolute; top: 10px; left: 200px; z-index: 10;">Map View</button>
+    <script>
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const vabCanvas = document.getElementById('vabCanvas');
+        const vabCtx = vabCanvas.getContext('2d');
+        vabCanvas.width = window.innerWidth;
+        vabCanvas.height = window.innerHeight;
+
+        const mapCanvas = document.getElementById('mapCanvas');
+        const mapCtx = mapCanvas.getContext('2d');
+        mapCanvas.width = window.innerWidth;
+        mapCanvas.height = window.innerHeight;
+
+        let inMapView = false; // Track whether the player is in map view
+
+        let inVAB = false;
+        let rocketParts = []; // Array to store rocket parts
+
+        // Define rocket parts
+        const partsCatalog = [
+            { name: 'Engine', width: 20, height: 40, color: 'red' },
+            { name: 'Fuel Tank', width: 20, height: 60, color: 'blue' },
+            { name: 'Capsule', width: 20, height: 30, color: 'gray' }
+        ];
+
+        // Rocket object
+        const rocket = {
+            x: canvas.width / 2,
+            y: canvas.height - 100,
+            width: 20,
+            height: 50,
+            velocity: 0,
+            thrust: -0.2,
+            gravity: 0.1,
+            fuel: 100
+        };
+
+        let draggingPart = null; // The part currently being dragged
+        let dragOffsetX = 0; // Offset between the mouse and the part's position
+        let dragOffsetY = 0;
+
+        let cameraOffsetX = 0; // Horizontal camera offset
+        let cameraOffsetY = 0; // Vertical camera offset
+
+        const stars = []; // Array to store star positions
+        const numStars = 100; // Number of stars
+
+        // Generate star positions
+        for (let i = 0; i < numStars; i++) {
+            stars.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                size: Math.random() * 2,
+            });
+        }
+
+        // Draw the ground
+        function drawGround() {
+            const groundHeight = 50;
+            ctx.fillStyle = '#654321'; // Brown color for the ground
+            ctx.fillRect(0, canvas.height - groundHeight, canvas.width, groundHeight);
+
+            // Add some texture to the ground
+            for (let i = 0; i < canvas.width; i += 20) {
+                ctx.fillStyle = '#4b3621'; // Darker brown for texture
+                ctx.fillRect(i, canvas.height - groundHeight, 10, Math.random() * 10);
+            }
+        }
+
+        // Draw the atmosphere
+        function drawAtmosphere() {
+            const maxAltitude = canvas.height; // Maximum altitude where the atmosphere fades completely
+            const altitude = Math.max(0, rocket.y); // Altitude is the rocket's distance from the top of the canvas
+            const atmosphereOpacity = Math.max(0, Math.min(1, 1 - altitude / maxAltitude)); // Opacity decreases as altitude increases
+
+            // Draw the atmosphere gradient
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, `rgba(0, 0, 0, 0)`); // Transparent at the top (space)
+            gradient.addColorStop(0.7, `rgba(135, 206, 235, ${0.3 * atmosphereOpacity})`); // Fading blue
+            gradient.addColorStop(1, `rgba(135, 206, 235, ${0.8 * atmosphereOpacity})`); // Sky blue at the bottom (near ground)
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw the starry background
+            drawStars(1 - atmosphereOpacity); // Pass the inverse of atmosphere opacity
+        }
+
+        // Draw the rocket
+        function drawRocket() {
+            ctx.fillStyle = 'white';
+            ctx.fillRect(rocket.x, rocket.y, rocket.width, rocket.height);
+        }
+
+        // Update the rocket's position
+        function updateRocket() {
+            if (rocket.fuel > 0 && thrusting) {
+                rocket.velocity += rocket.thrust;
+                rocket.fuel -= 0.5;
+            }
+            rocket.velocity += rocket.gravity;
+            rocket.y += rocket.velocity;
+
+            // Prevent the rocket from falling below the ground
+            const groundHeight = 50;
+            if (rocket.y + rocket.height > canvas.height - groundHeight) {
+                rocket.y = canvas.height - groundHeight - rocket.height;
+                rocket.velocity = 0;
+            }
+        }
+
+        // Handle user input
+        let thrusting = false;
+        window.addEventListener('keydown', (event) => {
+            if (event.code === 'Space') {
+                thrusting = true;
+            }
+        });
+
+        window.addEventListener('keyup', (event) => {
+            if (event.code === 'Space') {
+                thrusting = false;
+            }
+        });
+
+        // Enter VAB
+        document.getElementById('vabButton').addEventListener('click', () => {
+            inVAB = true;
+            canvas.style.display = 'none';
+            vabCanvas.style.display = 'block';
+            document.getElementById('vabButton').style.display = 'none';
+            document.getElementById('launchButton').style.display = 'block';
+            drawVAB();
+        });
+
+        // Exit VAB and launch
+        document.getElementById('launchButton').addEventListener('click', () => {
+            inVAB = false;
+            canvas.style.display = 'block';
+            vabCanvas.style.display = 'none';
+            document.getElementById('vabButton').style.display = 'block';
+            document.getElementById('launchButton').style.display = 'none';
+            loadRocket();
+        });
+
+        // Draw VAB interface
+        function drawVAB() {
+            vabCtx.clearRect(0, 0, vabCanvas.width, vabCanvas.height);
+
+            // Save the current context state
+            vabCtx.save();
+
+            // Translate the canvas to center on the rocket
+            vabCtx.translate(-cameraOffsetX + vabCanvas.width / 2, -cameraOffsetY + vabCanvas.height / 2);
+
+            // Draw parts catalog
+            partsCatalog.forEach((part, index) => {
+                vabCtx.fillStyle = part.color;
+                vabCtx.fillRect(-vabCanvas.width / 2 + 50, -vabCanvas.height / 2 + 50 + index * 80, part.width, part.height);
+                vabCtx.fillStyle = 'white';
+                vabCtx.fillText(part.name, -vabCanvas.width / 2 + 80, -vabCanvas.height / 2 + 70 + index * 80);
+            });
+
+            // Draw assembled rocket
+            rocketParts.forEach((part) => {
+                vabCtx.fillStyle = part.color;
+                vabCtx.fillRect(part.x, part.y, part.width, part.height);
+            });
+
+            // Draw the part being dragged
+            if (draggingPart) {
+                vabCtx.fillStyle = draggingPart.color;
+                vabCtx.fillRect(draggingPart.x, draggingPart.y, draggingPart.width, draggingPart.height);
+            }
+
+            // Restore the context state
+            vabCtx.restore();
+
+            requestAnimationFrame(drawVAB);
+        }
+
+        // Add parts to the rocket
+        vabCanvas.addEventListener('click', (event) => {
+            const rect = vabCanvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+
+            // Check if a part in the catalog is clicked
+            partsCatalog.forEach((part, index) => {
+                if (mouseX >= 50 && mouseX <= 50 + part.width && mouseY >= 50 + index * 80 && mouseY <= 50 + index * 80 + part.height) {
+                    rocketParts.push(part); // Add part to the rocket
+                }
+            });
+        });
+
+        // Start dragging a part
+        vabCanvas.addEventListener('mousedown', (event) => {
+            const rect = vabCanvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left - vabCanvas.width / 2 + cameraOffsetX;
+            const mouseY = event.clientY - rect.top - vabCanvas.height / 2 + cameraOffsetY;
+
+            partsCatalog.forEach((part, index) => {
+                const partX = -vabCanvas.width / 2 + 50;
+                const partY = -vabCanvas.height / 2 + 50 + index * 80;
+                if (mouseX >= partX && mouseX <= partX + part.width && mouseY >= partY && mouseY <= partY + part.height) {
+                    draggingPart = { ...part, x: mouseX, y: mouseY };
+                    dragOffsetX = mouseX - partX;
+                    dragOffsetY = mouseY - partY;
+                }
+            });
+        });
+
+        // Drag the part
+        vabCanvas.addEventListener('mousemove', (event) => {
+            if (draggingPart) {
+                const rect = vabCanvas.getBoundingClientRect();
+                const mouseX = event.clientX - rect.left - vabCanvas.width / 2 + cameraOffsetX;
+                const mouseY = event.clientY - rect.top - vabCanvas.height / 2 + cameraOffsetY;
+
+                draggingPart.x = mouseX - dragOffsetX;
+                draggingPart.y = mouseY - dragOffsetY;
+            }
+        });
+
+        // Drop the part
+        vabCanvas.addEventListener('mouseup', (event) => {
+            if (draggingPart) {
+                const rect = vabCanvas.getBoundingClientRect();
+                const mouseX = event.clientX - rect.left - vabCanvas.width / 2 + cameraOffsetX;
+                const mouseY = event.clientY - rect.top - vabCanvas.height / 2 + cameraOffsetY;
+
+                let connected = false;
+
+                // Check for valid connections
+                rocketParts.forEach((part) => {
+                    const bottomConnectorX = part.x + part.width / 2;
+                    const bottomConnectorY = part.y + part.height;
+                    if (
+                        Math.abs(mouseX - bottomConnectorX) < 10 &&
+                        Math.abs(mouseY - bottomConnectorY) < 10
+                    ) {
+                        draggingPart.x = part.x;
+                        draggingPart.y = part.y + part.height;
+                        connected = true;
+                    }
+                });
+
+                // Add the part to the rocket if connected
+                if (connected) {
+                    console.log('Part connected:', draggingPart); // Debugging log
+                    rocketParts.push({ ...draggingPart });
+                    updateCamera(); // Update the camera to center on the rocket
+                } else {
+                    console.log('Part not connected, dropping at current position:', draggingPart); // Debugging log
+                    rocketParts.push({ ...draggingPart }); // Add the part even if not connected
+                }
+
+                // Reset draggingPart to null after the part is dropped
+                draggingPart = null;
+            }
+        });
+
+        // Load the rocket into the simulation
+        function loadRocket() {
+            if (rocketParts.length > 0) {
+                rocket.width = rocketParts[0].width;
+                rocket.height = rocketParts.reduce((total, part) => total + part.height, 0);
+                rocket.x = canvas.width / 2 - rocket.width / 2;
+                rocket.y = canvas.height - 100 - rocket.height;
+            }
+        }
+
+        // Update the camera position
+        function updateCamera() {
+            if (rocketParts.length > 0) {
+                // Center the camera on the first part of the rocket
+                const firstPart = rocketParts[0];
+                cameraOffsetX = firstPart.x + firstPart.width / 2;
+                cameraOffsetY = firstPart.y + firstPart.height / 2;
+            }
+        }
+
+        // Main animation loop
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Calculate camera offset to center the rocket
+            const cameraOffsetY = rocket.y - canvas.height / 2;
+
+            // Save the current context state
+            ctx.save();
+
+            // Translate the canvas to follow the rocket
+            ctx.translate(0, -cameraOffsetY);
+
+            // Draw the atmosphere and ground
+            drawAtmosphere();
+            drawGround();
+
+            // Update and draw the rocket
+            updateRocket();
+            drawRocket();
+
+            // Restore the context state
+            ctx.restore();
+
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+        document.getElementById('mapButton').addEventListener('click', () => {
+            inMapView = !inMapView;
+
+            if (inMapView) {
+                canvas.style.display = 'none';
+                vabCanvas.style.display = 'none';
+                mapCanvas.style.display = 'block';
+                document.getElementById('vabButton').style.display = 'none';
+                document.getElementById('launchButton').style.display = 'none';
+                drawMap();
+            } else {
+                canvas.style.display = 'block';
+                vabCanvas.style.display = 'none';
+                mapCanvas.style.display = 'none';
+                document.getElementById('vabButton').style.display = 'block';
+                document.getElementById('launchButton').style.display = 'block';
+            }
+        });
+
+        function drawMap() {
+            mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+            // Draw the planet
+            const planetRadius = 200; // Scaled-down radius of the planet
+            const planetX = mapCanvas.width / 2;
+            const planetY = mapCanvas.height / 2;
+
+            mapCtx.fillStyle = 'blue';
+            mapCtx.beginPath();
+            mapCtx.arc(planetX, planetY, planetRadius, 0, Math.PI * 2);
+            mapCtx.fill();
+
+            // Draw the rocket
+            const mapScale = planetRadius / (canvas.height / 2); // Scale factor for the map
+            const rocketMapX = planetX + (rocket.x - canvas.width / 2) * mapScale;
+            const rocketMapY = planetY + (rocket.y - canvas.height / 2) * mapScale;
+
+            mapCtx.fillStyle = 'white';
+            mapCtx.fillRect(rocketMapX - 2, rocketMapY - 5, 4, 10); // Scaled-down rocket
+
+            // Draw the trajectory
+            drawTrajectory(mapCtx, planetX, planetY, mapScale);
+
+            if (inMapView) {
+                requestAnimationFrame(drawMap);
+            }
+        }
+
+        function drawTrajectory(ctx, planetX, planetY, mapScale) {
+            const trajectoryPoints = [];
+            const simulationSteps = 500; // Number of steps to simulate
+            const timeStep = 0.1; // Time step for each simulation step
+
+            // Copy the rocket's current position and velocity
+            let simulatedX = rocket.x;
+            let simulatedY = rocket.y;
+            let simulatedVelocityX = 0; // Assuming no horizontal velocity for now
+            let simulatedVelocityY = rocket.velocity;
+
+            for (let i = 0; i < simulationSteps; i++) {
+                // Apply gravity
+                simulatedVelocityY += rocket.gravity * timeStep;
+
+                // Update position
+                simulatedX += simulatedVelocityX * timeStep;
+                simulatedY += simulatedVelocityY * timeStep;
+
+                // Scale the position for the map
+                const mapX = planetX + (simulatedX - canvas.width / 2) * mapScale;
+                const mapY = planetY + (simulatedY - canvas.height / 2) * mapScale;
+
+                trajectoryPoints.push({ x: mapX, y: mapY });
+
+                // Stop simulation if the rocket hits the ground
+                if (simulatedY >= canvas.height - 50) {
+                    break;
+                }
+            }
+
+            // Draw the trajectory
+            ctx.strokeStyle = 'yellow';
+            ctx.beginPath();
+            trajectoryPoints.forEach((point, index) => {
+                if (index === 0) {
+                    ctx.moveTo(point.x, point.y);
+                } else {
+                    ctx.lineTo(point.x, point.y);
+                }
+            });
+            ctx.stroke();
+        }
+
+        let time = 0; // Global time variable
+        const flickerRate = 0.05; // Adjust this value to control the flicker speed
+
+        function drawStars(opacity) {
+            if (opacity <= 0) return; // Skip drawing stars if opacity is 0
+
+            ctx.save();
+            ctx.globalAlpha = opacity; // Set the opacity for the stars
+
+            stars.forEach((star, index) => {
+                // Calculate dynamic opacity for flickering
+                const starOpacity = 0.5 + 0.5 * Math.sin(time * flickerRate + index);
+
+                ctx.fillStyle = `rgba(255, 255, 255, ${starOpacity})`;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            ctx.restore();
+
+            time += 1; // Increment time for the next frame
+        }
+    </script>
+</body>
+</html>

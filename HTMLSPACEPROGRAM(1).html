@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rocket Simulation</title>
+    
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="simulationCanvas"></canvas>
+    <canvas id="vabCanvas" style="display: none;"></canvas>
+    <button id="vabButton" style="position: absolute; top: 10px; left: 10px; z-index: 10;">Enter VAB</button>
+    <button id="launchButton" style="position: absolute; top: 10px; left: 100px; z-index: 10; display: none;">Launch</button>
+    <canvas id="mapCanvas" style="display: none; position: absolute; top: 0; left: 0; z-index: 5;"></canvas>
+    <button id="mapButton" style="position: absolute; top: 10px; left: 200px; z-index: 10;">Map View</button>
+    <button id="pauseButton" style="position: absolute; top: 10px; left: 300px; z-index: 10;">Pause</button>
+    <button id="resumeButton" style="position: absolute; top: 10px; left: 400px; z-index: 10;">Resume</button>
+    
+<div id="orbitalInfo" style="position: absolute; top: 10px; right: 10px; color:white; background: rgba(0, 0, 0, 0.8); padding: 10px; z-index: 10; display: none;">
+    <h3>Orbital Info</h3>
+    <p id="altitude">Altitude: 0 m</p>
+    <p id="velocity">Velocity: 0 m/s</p>
+    <p id="apoapsis">Apoapsis: 0 m</p>
+    <p id="periapsis">Periapsis: 0 m</p>
+</div>
+    <div id="fuelDisplay" style="position: absolute; top: 50px; left: 10px; color: white; font-size: 16px; z-index: 10;">
+        Fuel: 100%
+    </div>
+    <button id="resetButton" style="position: absolute; top: 90px; left: 10px; z-index: 10;">Reset Rocket</button>
+    <div id="debugMenu" style="position: absolute; top: 150px; left: 10px; background: rgba(0, 0, 0, 0.8); color: white; padding: 10px; z-index: 10; display: block;">
+        <h3>Debug Menu</h3>
+        <button id="infiniteFuelButton">Toggle Infinite Fuel</button>
+    </div>
+    <button id="toggleDebugMenu" style="position: absolute; top: 130px; left: 10px; z-index: 10;">Debug Menu</button>
+    <div id="debugThrustVector" style="position: absolute; top: 200px; left: 10px; color: white; font-size: 16px; z-index: 10;">
+        Thrust Vector: { x: 0, y: 0 }
+    </div>
+    <div style="position: absolute; top: 250px; left: 10px; color: white; z-index: 10;">
+        <label for="thrustSlider">Thrust Multiplier:</label>
+        <input id="thrustSlider" type="range" min="0.001" max="0.05" step="0.001" value="0.01">
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script>
+        // Matter.js setup
+        const { Engine, Render, Runner, World, Bodies, Body, Events } = Matter;
+
+        // Create the engine and world
+        const engine = Engine.create();
+        const world = engine.world;
+
+        // Create the canvas
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Rocket properties
+        const rocketWidth = 20;
+        const rocketHeight = 50;
+        const groundHeight = 50;
+
+        // Create the rocket body
+        const rocket = Bodies.rectangle(canvas.width / 2, canvas.height - 100, rocketWidth, rocketHeight, {
+            frictionAir: 0.02, // Simulate air resistance
+            restitution: 0.1,  // Bounce factor
+            density: 0.01      // Mass density
+        });
+        World.add(world, rocket);
+
+        // Create the ground
+        const ground = Bodies.rectangle(canvas.width / 2, canvas.height - groundHeight / 2, canvas.width, groundHeight, {
+            isStatic: true // The ground doesn't move
+        });
+        World.add(world, ground);
+
+        // Variables for thrust and rotation
+        let thrusting = false;
+        let infiniteFuel = false;
+        let fuel = 100;
+
+        // Handle user input
+        window.addEventListener('keydown', (event) => {
+            if (event.code === 'ArrowLeft') {
+                Body.rotate(rocket, -0.1); // Rotate counterclockwise
+            } else if (event.code === 'ArrowRight') {
+                Body.rotate(rocket, 0.1); // Rotate clockwise
+            } else if (event.code === 'Space') {
+                thrusting = true;
+            }
+        });
+
+        window.addEventListener('keyup', (event) => {
+            if (event.code === 'Space') {
+                thrusting = false;
+            }
+        });
+
+        // Apply thrust to the rocket
+        function applyThrust() {
+            if (thrusting && (fuel > 0 || infiniteFuel)) {
+                const thrustMultiplier = parseFloat(document.getElementById('thrustSlider').value);
+                const angle = rocket.angle - Math.PI / 2; // Adjust angle to point "upward"
+                const thrustForce = {
+                    x: Math.cos(angle) * thrustMultiplier,
+                    y: Math.sin(angle) * thrustMultiplier
+                };
+                Body.applyForce(rocket, rocket.position, thrustForce);
+
+                if (!infiniteFuel) {
+                    fuel -= 0.5; // Decrease fuel
+                }
+            }
+        }
+
+        // Update the fuel display
+        function updateFuelDisplay() {
+            const fuelPercentage = Math.max(0, Math.floor(fuel));
+            document.getElementById('fuelDisplay').textContent = `Fuel: ${fuelPercentage}%`;
+        }
+
+        // Draw the rocket
+        function drawRocket() {
+            ctx.save();
+            ctx.translate(rocket.position.x, rocket.position.y);
+            ctx.rotate(rocket.angle);
+
+            // Draw the rocket body
+            ctx.fillStyle = 'white';
+            ctx.fillRect(-rocketWidth / 2, -rocketHeight / 2, rocketWidth, rocketHeight);
+
+            ctx.restore();
+        }
+
+        // Draw the ground
+        function drawGround() {
+            ctx.fillStyle = '#654321'; // Brown color for the ground
+            ctx.beginPath();
+            ctx.moveTo(terrainPoints[0].x, terrainPoints[0].y);
+
+            for (let i = 1; i < terrainPoints.length; i++) {
+                ctx.lineTo(terrainPoints[i].x, terrainPoints[i].y);
+            }
+
+            // Connect the terrain to the bottom of the canvas
+            ctx.lineTo(terrainPoints[terrainPoints.length - 1].x, canvas.height);
+            ctx.lineTo(terrainPoints[0].x, canvas.height);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        // Main render loop
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Save the current context state
+            ctx.save();
+
+            // Translate the canvas to center the rocket
+            const cameraOffsetX = canvas.width / 2 - rocket.position.x;
+            const cameraOffsetY = canvas.height / 2 - rocket.position.y;
+            ctx.translate(cameraOffsetX, cameraOffsetY);
+
+            // Generate and draw the terrain
+            generateTerrain();
+            drawGround();
+
+            // Draw the rocket
+            drawRocket();
+
+            // Restore the context state
+            ctx.restore();
+
+            // Update the fuel display
+            updateFuelDisplay();
+
+            requestAnimationFrame(render);
+        }
+        
+        // Run the Matter.js engine
+        const runner = Runner.create();
+        Runner.run(runner, engine); // Use Runner.run instead of Engine.run
+
+        // Run the custom render loop
+        render();
+
+        // Apply thrust in the Matter.js update loop
+        Events.on(engine, 'beforeUpdate', () => {
+            applyThrust();
+        });
+
+        // Reset the rocket
+        document.getElementById('resetButton').addEventListener('click', () => {
+            Body.setPosition(rocket, { x: canvas.width / 2, y: canvas.height - 100 });
+            Body.setVelocity(rocket, { x: 0, y: 0 });
+            Body.setAngle(rocket, 0);
+            fuel = 100; // Reset fuel
+        });
+
+        // Toggle infinite fuel
+        document.getElementById('infiniteFuelButton').addEventListener('click', () => {
+            infiniteFuel = !infiniteFuel; // Toggle infinite fuel
+            const button = document.getElementById('infiniteFuelButton');
+            button.textContent = infiniteFuel ? 'Disable Infinite Fuel' : 'Enable Infinite Fuel'; // Update button text
+            alert(`Infinite Fuel: ${infiniteFuel ? 'ON' : 'OFF'}`);
+        });
+        function geterrorcode(returnedvalue) {
+            if(returnedvalue = "VAB") { 
+                return "002";
+            }
+        }
+        document.getElementById('vabButton').addEventListener('click', () => {
+            try {
+                document.getElementById('vabcanvas').style.display = 'block';
+            } catch(error) {
+            const returnedvalue = "VAB"
+            let errorcode = geterrorcode(returnedvalue);
+            alert("VAB IS NOT IMPLEMENTED ERROR CODE:" + errorcode);
+            }
+        });
+
+        document.getElementById('pauseButton').addEventListener('click', () => {
+            Runner.stop(runner); // Pause the simulation
+            console.log('Simulation paused');
+        });
+
+        document.getElementById('resumeButton').addEventListener('click', () => {
+            Runner.run(runner, engine); // Resume the simulation
+            console.log('Simulation resumed');
+        });
+
+        // Map canvas setup
+        const mapCanvas = document.getElementById('mapCanvas');
+        const mapCtx = mapCanvas.getContext('2d');
+        mapCanvas.width = window.innerWidth;
+        mapCanvas.height = window.innerHeight;
+
+        // Variables for the map view
+        const planetX = mapCanvas.width / 2; // Planet's center X
+        const planetY = mapCanvas.height / 2; // Planet's center Y
+        const trajectoryPoints = []; // Store rocket positions for trajectory
+
+        // Toggle map view
+        document.getElementById('mapButton').addEventListener('click', () => {
+            const isMapVisible = mapCanvas.style.display === 'block';
+
+            // Toggle visibility of canvases and orbital info
+            mapCanvas.style.display = isMapVisible ? 'none' : 'block';
+            canvas.style.display = isMapVisible ? 'block' : 'none';
+            document.getElementById('orbitalInfo').style.display = isMapVisible ? 'none' : 'block';
+
+            if (isMapVisible) {
+                console.log('Switched to regular mode');
+            } else {
+                console.log('Switched to map view');
+            }
+        });
+
+        // Draw the polar coordinate system
+        function drawPolarCoordinates() {
+            mapCtx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            mapCtx.lineWidth = 1;
+
+            // Draw concentric circles
+            for (let radius = 100; radius < mapCanvas.width / 2; radius += 100) {
+                mapCtx.beginPath();
+                mapCtx.arc(planetX, planetY, radius, 0, Math.PI * 2);
+                mapCtx.stroke();
+            }
+
+            // Draw radial lines
+            for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+                const x = planetX + Math.cos(angle) * (mapCanvas.width / 2);
+                const y = planetY + Math.sin(angle) * (mapCanvas.height / 2);
+                mapCtx.beginPath();
+                mapCtx.moveTo(planetX, planetY);
+                mapCtx.lineTo(x, y);
+                mapCtx.stroke();
+            }
+        }
+
+        // Draw the planet
+        function drawPlanet() {
+            mapCtx.fillStyle = 'blue';
+            mapCtx.beginPath();
+            mapCtx.arc(planetX, planetY, 50, 0, Math.PI * 2); // Planet radius is 50
+            mapCtx.fill();
+        }
+
+        // Draw the rocket's trajectory
+        function drawTrajectory() {
+            const futureTrajectory = calculateFutureTrajectory();
+
+            if (futureTrajectory.length < 2) return;
+
+            mapCtx.strokeStyle = 'yellow';
+            mapCtx.lineWidth = 2;
+            mapCtx.beginPath();
+            mapCtx.moveTo(futureTrajectory[0].x, futureTrajectory[0].y);
+
+            for (let i = 1; i < futureTrajectory.length; i++) {
+                mapCtx.lineTo(futureTrajectory[i].x, futureTrajectory[i].y);
+            }
+
+            mapCtx.stroke();
+        }
+
+        // Draw the rocket's current position
+        function drawRocketOnMap() {
+            // Calculate the rocket's position relative to the planet's center
+            const rocketX = planetX + (rocket.position.x - canvas.width / 2);
+            const rocketY = planetY + (rocket.position.y - canvas.height / 2);
+            const arrowSize = 15; // Size of the arrow
+
+            // Calculate the arrow's direction based on the rocket's velocity
+            const velocityAngle = Math.atan2(rocket.velocity.y, rocket.velocity.x);
+            const arrowTipX = rocketX + Math.cos(velocityAngle) * arrowSize;
+            const arrowTipY = rocketY + Math.sin(velocityAngle) * arrowSize;
+
+            const arrowLeftX = rocketX + Math.cos(velocityAngle + Math.PI * 3 / 4) * (arrowSize / 2);
+            const arrowLeftY = rocketY + Math.sin(velocityAngle + Math.PI * 3 / 4) * (arrowSize / 2);
+
+            const arrowRightX = rocketX + Math.cos(velocityAngle - Math.PI * 3 / 4) * (arrowSize / 2);
+            const arrowRightY = rocketY + Math.sin(velocityAngle - Math.PI * 3 / 4) * (arrowSize / 2);
+
+            // Draw the arrow
+            mapCtx.fillStyle = 'red';
+            mapCtx.beginPath();
+            mapCtx.moveTo(arrowTipX, arrowTipY); // Tip of the arrow
+            mapCtx.lineTo(arrowLeftX, arrowLeftY); // Left side of the arrow
+            mapCtx.lineTo(arrowRightX, arrowRightY); // Right side of the arrow
+            mapCtx.closePath();
+            mapCtx.fill();
+        }
+
+        // Main map render loop
+        function renderMap() {
+            mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+            // Draw the polar coordinate system
+            drawPolarCoordinates();
+
+            // Draw the planet
+            drawPlanet();
+
+            // Draw the rocket's trajectory
+            drawTrajectory();
+
+            // Draw the rocket as an arrow
+            drawRocketOnMap();
+
+            // Update orbital information
+            updateOrbitalInfo();
+
+            requestAnimationFrame(renderMap);
+        }
+
+        // Run the custom map render loop
+        renderMap();
+
+        // Calculate future trajectory
+        function calculateFutureTrajectory(steps = 1000, timeStep = 0.1) {
+            const futureTrajectory = [];
+            let simulatedPosition = { x: rocket.position.x, y: rocket.position.y };
+            let simulatedVelocity = { x: rocket.velocity.x, y: rocket.velocity.y };
+            const angle = rocket.angle - Math.PI / 2;
+
+            for (let i = 0; i < steps; i++) {
+                // Apply thrust
+                const thrustMultiplier = parseFloat(document.getElementById('thrustSlider').value);
+                const thrustForce = {
+                    x: Math.cos(angle) * thrustMultiplier,
+                    y: Math.sin(angle) * thrustMultiplier
+                };
+
+                // Apply gravity
+                const gravity = engine.world.gravity.y;
+
+                // Update velocity
+                simulatedVelocity.x += thrustForce.x * timeStep;
+                simulatedVelocity.y += (thrustForce.y + gravity) * timeStep;
+
+                // Update position
+                simulatedPosition.x += simulatedVelocity.x * timeStep;
+                simulatedPosition.y += simulatedVelocity.y * timeStep;
+
+                // Add the position to the future trajectory
+                futureTrajectory.push({
+                    x: planetX + (simulatedPosition.x - canvas.width / 2),
+                    y: planetY + (simulatedPosition.y - canvas.height / 2)
+                });
+            }
+
+            return futureTrajectory;
+        }
+
+        function updateOrbitalInfo() {
+            const rocketX = rocket.position.x - canvas.width / 2;
+            const rocketY = rocket.position.y - canvas.height / 2;
+
+            // Calculate altitude (distance from planet center)
+            const altitude = Math.sqrt(rocketX ** 2 + rocketY ** 2);
+
+            // Calculate velocity
+            const velocity = Math.sqrt(rocket.velocity.x ** 2 + rocket.velocity.y ** 2);
+
+            // For simplicity, assume apoapsis and periapsis are the max/min altitudes
+            const apoapsis = altitude + 1000; // Placeholder calculation
+            const periapsis = altitude - 1000; // Placeholder calculation
+
+            // Update the orbital info box
+            document.getElementById('altitude').textContent = `Altitude: ${Math.floor(altitude)} m`;
+            document.getElementById('velocity').textContent = `Velocity: ${Math.floor(velocity)} m/s`;
+            document.getElementById('apoapsis').textContent = `Apoapsis: ${Math.floor(apoapsis)} m`;
+            document.getElementById('periapsis').textContent = `Periapsis: ${Math.floor(periapsis)} m`;
+        }
+
+        const terrainPoints = []; // Array to store terrain points
+        const terrainSegmentWidth = 50; // Width of each terrain segment
+        const terrainAmplitude = 100; // Amplitude of the terrain curve
+        const terrainFrequency = 0.01; // Frequency of the terrain curve
+
+        function generateTerrain() {
+            if (terrainPoints.length === 0) {
+                // Initialize the terrain with a flat starting point
+                for (let x = -canvas.width; x <= canvas.width * 2; x += terrainSegmentWidth) {
+                    const y = canvas.height - groundHeight;
+                    terrainPoints.push({ x, y });
+                }
+            }
+
+            // Add new terrain points as the rocket moves
+            const lastPoint = terrainPoints[terrainPoints.length - 1];
+            const newX = lastPoint.x + terrainSegmentWidth;
+            const newY = canvas.height - groundHeight + Math.sin(newX * terrainFrequency) * terrainAmplitude;
+
+            terrainPoints.push({ x: newX, y: newY });
+
+            // Remove old terrain points to prevent memory overflow
+            if (terrainPoints[0].x < rocket.position.x - canvas.width) {
+                terrainPoints.shift();
+            }
+        }
+    </script>
+</body>
+</html>

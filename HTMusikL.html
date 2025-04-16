@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTMusikL</title>
+</head>
+<body>
+    <h1>HTMusikL</h1>
+
+    <!-- Audio Player -->
+    <audio id="audioPlayer" controls>
+        <source id="audioSource" src="" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+
+    <!-- Add New Song -->
+    <div>
+        <input id="songInput" type="text" placeholder="Enter song file path or URL">
+        <button id="addSongButton">Add Song</button>
+    </div>
+
+    <!-- Playlist Controls -->
+    <button id="playButton">Play</button>
+    <button id="pauseButton">Pause</button>
+    <button id="nextButton">Next</button>
+    <button id="prevButton">Previous</button>
+
+    <script>
+        // Playlist and current song index
+        const playlist = [];
+        let currentSongIndex = 0;
+
+        // Get references to HTML elements
+        const audioPlayer = document.getElementById('audioPlayer');
+        const audioSource = document.getElementById('audioSource');
+        const songInput = document.getElementById('songInput');
+        const addSongButton = document.getElementById('addSongButton');
+
+        // Add a new song to the playlist
+        addSongButton.addEventListener('click', () => {
+            const newSong = songInput.value.trim(); // Get the input value
+            if (newSong) {
+                playlist.push(newSong); // Add the song to the playlist
+                songInput.value = ''; // Clear the input box
+                alert(`Song added: ${newSong}`);
+            } else {
+                alert('Please enter a valid song file path or URL.');
+            }
+        });
+
+        // Play the current song
+        function playSong() {
+            if (playlist.length > 0) {
+                audioSource.src = playlist[currentSongIndex]; // Set the audio source
+                audioPlayer.load(); // Reload the audio element
+                audioPlayer.play(); // Play the audio
+            } else {
+                alert('No songs in the playlist.');
+            }
+        }
+
+        // Play the next song
+        document.getElementById('nextButton').addEventListener('click', () => {
+            if (playlist.length > 0) {
+                currentSongIndex = (currentSongIndex + 1) % playlist.length; // Move to the next song
+                playSong();
+            }
+        });
+
+        // Play the previous song
+        document.getElementById('prevButton').addEventListener('click', () => {
+            if (playlist.length > 0) {
+                currentSongIndex = (currentSongIndex - 1 + playlist.length) % playlist.length; // Move to the previous song
+                playSong();
+            }
+        });
+
+        // Play and Pause Buttons
+        document.getElementById('playButton').addEventListener('click', () => {
+            audioPlayer.play();
+        });
+
+        document.getElementById('pauseButton').addEventListener('click', () => {
+            audioPlayer.pause();
+        });
+    </script>
+</body>
+</html>

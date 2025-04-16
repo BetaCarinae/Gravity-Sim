@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gravitational Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            margin: auto;
+            background-color: #111;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 10;
+        }
+        button {
+            margin: 5px;
+            padding: 10px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <button id="addMassButton">Add New Mass</button>
+        <button id="timeButton">Speed: 1x</button>
+        <button id="pauseButton">Pause Sim</button>
+    </div>
+    <canvas id="simulationCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+        const addMassButton = document.getElementById('addMassButton');
+        const timeButton = document.getElementById('timeButton');
+        const pauseButton = document.getElementById('pauseButton');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let timeMultiplier = 1;
+        let isPaused = false;
+
+        class Body {
+            constructor(x, y, mass, radius, color) {
+                this.x = x;
+                this.y = y;
+                this.mass = mass;
+                this.radius = radius;
+                this.color = color;
+                this.vx = 0;
+                this.vy = 0;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.closePath();
+            }
+
+            update(bodies) {
+                for (let body of bodies) {
+                    if (body !== this) {
+                        const dx = body.x - this.x;
+                        const dy = body.y - this.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        const force = (body.mass / (distance * distance)) || 0;
+
+                        this.vx += (dx / distance) * force * timeMultiplier;
+                        this.vy += (dy / distance) * force * timeMultiplier;
+                    }
+                }
+                this.x += this.vx * timeMultiplier;
+                this.y += this.vy * timeMultiplier;
+            }
+        }
+
+        const bodies = [
+            new Body(canvas.width / 2, canvas.height / 2, 10000, 30, 'yellow'),
+            new Body(canvas.width / 2 + 150, canvas.height / 2, 100, 10, 'blue'),
+            new Body(canvas.width / 2 - 150, canvas.height / 2, 100, 10, 'red')
+        ];
+
+        addMassButton.addEventListener('click', () => {
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const mass = Math.random() * 500 + 50;
+            const radius = Math.random() * 10 + 5;
+            const color = `hsl(${Math.random() * 360}, 100%, 50%)`;
+            bodies.push(new Body(x, y, mass, radius, color));
+        });
+
+        timeButton.addEventListener('click', () => {
+            if (timeMultiplier === 1) {
+                timeMultiplier = 0.5;
+                timeButton.textContent = 'Speed: 0.5x';
+            } else if (timeMultiplier === 0.5) {
+                timeMultiplier = 2;
+                timeButton.textContent = 'Speed: 2x';
+            } else {
+                timeMultiplier = 1;
+                timeButton.textContent = 'Speed: 1x';
+            }
+        });
+
+        pauseButton.addEventListener('click', () => {
+            isPaused = !isPaused;
+            pauseButton.textContent = isPaused ? 'Resume Sim' : 'Pause Sim';
+        });
+
+        function animate() {
+            if (!isPaused) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                for (let body of bodies) {
+                    body.update(bodies);
+                    body.draw();
+                }
+            }
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
